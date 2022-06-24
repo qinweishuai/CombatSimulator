@@ -22,8 +22,8 @@ def StartCombat():
     a2 = StzbServant(TeamA_Config[1], 40)
     a3 = StzbServant(TeamA_Config[2], 38)
 
-    b1 = StzbServant(TeamB_Config[0], 1)
-    b2 = StzbServant(TeamB_Config[1], 1)
-    b3 = StzbServant(TeamB_Config[2], 1)
+    b1 = StzbServant(TeamB_Config[0], 40)
+    b2 = StzbServant(TeamB_Config[1], 40)
+    b3 = StzbServant(TeamB_Config[2], 40)
     print(a1.attack, a2.defense, a3.speed, b1.main_skill, b2.name)
     
