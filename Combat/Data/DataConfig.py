@@ -1,7 +1,7 @@
 import pandas as pd
 
 
-ServantTable = "./Data/Tables/servant.csv"
+ServantTable = "./Combat/Data/Tables/servant.csv"
 
 class ServantConfigData:
     config_id = 1
