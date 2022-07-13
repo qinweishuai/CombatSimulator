@@ -11,3 +11,6 @@ if __name__ == "__main__":
      DB = DataConfig()
      gol.set_value("DataBase", DB)
      Combat.StartCombat()
+
+
+     print("Main Start")
