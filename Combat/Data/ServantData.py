@@ -1,7 +1,7 @@
 #!/usr/bin/python3
-from Data.SkillData import StzbSkill
-from Data.DataConfig import DataConfig
-import gol
+from Combat.Data.SkillData import StzbSkill
+from Combat.Data.DataConfig import DataConfig
+from Combat import gol
 
 class StzbServant:
     main_skill = StzbSkill(1,1)

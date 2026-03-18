@@ -1,7 +1,8 @@
+import os
 import pandas as pd
 
 
-ServantTable = "./Combat/Data/Tables/servant.csv"
+ServantTable = os.path.join(os.path.dirname(__file__), "Tables", "servant.csv")
 
 class ServantConfigData:
     config_id = 1
