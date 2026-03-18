@@ -1,9 +1,6 @@
 #!/usr/bin/python3
 
-from ast import For, While
-
-from pyparsing import Or
-from Data.ServantData import StzbServant
+from Combat.Data.ServantData import StzbServant
 
 
 TeamA_Config = [10001, 10002, 10003]
