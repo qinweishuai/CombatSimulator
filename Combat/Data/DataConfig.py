@@ -32,6 +32,13 @@ class SkillConfigData:
     damage_ratio = 1.0
     heal_ratio = 0.0
     cooldown = 2
+    trigger_prob = 1.0
+    buff_atk = 0.0
+    buff_def = 0.0
+    buff_tactics = 0.0
+    buff_speed = 0.0
+    buff_turns = 0
+    silence_turns = 0
 
 
 class DataConfig:
@@ -83,4 +90,11 @@ class DataConfig:
             skill_data.damage_ratio = float(mSkillConfigData["damage_ratio"])
             skill_data.heal_ratio = float(mSkillConfigData["heal_ratio"])
             skill_data.cooldown = int(mSkillConfigData["cooldown"])
+            skill_data.trigger_prob = float(mSkillConfigData.get("trigger_prob", 1.0))
+            skill_data.buff_atk = float(mSkillConfigData.get("buff_atk", 0.0))
+            skill_data.buff_def = float(mSkillConfigData.get("buff_def", 0.0))
+            skill_data.buff_tactics = float(mSkillConfigData.get("buff_tactics", 0.0))
+            skill_data.buff_speed = float(mSkillConfigData.get("buff_speed", 0.0))
+            skill_data.buff_turns = int(mSkillConfigData.get("buff_turns", 0))
+            skill_data.silence_turns = int(mSkillConfigData.get("silence_turns", 0))
         return skill_data

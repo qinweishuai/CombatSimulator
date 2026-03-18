@@ -14,6 +14,7 @@ TeamB_Config = [10004, 10005, 10006]
 _POSITION_LABEL_A = {1: "前锋", 2: "中军", 3: "大营"}
 _POSITION_LABEL_B = {4: "前锋", 5: "中军", 6: "大营"}
 _TEAM_LABEL = {1: "甲方", 2: "乙方"}
+_SKILL_TYPE_LABEL = {1: "主动", 2: "被动", 3: "指挥", 4: "追击"}
 
 
 # ── Helper: check whether an entire team has been defeated ────────────────────
@@ -57,6 +58,22 @@ class ServantState:
     left_turn = 1
 
 
+# ── Stat buff ─────────────────────────────────────────────────────────────────
+class StatBuff:
+    """
+    A temporary or permanent stat modifier attached to a TeamMember.
+
+    buff_type       : 'atk' | 'def' | 'tactics' | 'speed'
+    value           : additive ratio (e.g. 0.3 = +30 %)
+    remaining_turns : -1 = lasts the entire battle; >0 = turns remaining
+    """
+
+    def __init__(self, buff_type, value, remaining_turns):
+        self.buff_type = buff_type
+        self.value = value
+        self.remaining_turns = remaining_turns
+
+
 # ── TeamMember ────────────────────────────────────────────────────────────────
 class TeamMember:
     """
@@ -87,6 +104,10 @@ class TeamMember:
         self.max_power = self.servant.health
         self.power = self.servant.health
 
+        # Stat buffs and status effects
+        self.stat_buffs = []        # list[StatBuff]
+        self.silence_remaining = 0  # turns of silence remaining
+
         # Build skill slots: [main_skill, second_skill, third_skill]
         DB = gol.get_value("DataBase")
         main_id = self.servant.main_skill_id
@@ -104,10 +125,12 @@ class TeamMember:
 
     # ── Accessors ──────────────────────────────────────────────────────────────
     def GetServantAtk(self):
-        return self.servant.attack
+        bonus = sum(b.value for b in self.stat_buffs if b.buff_type == 'atk')
+        return self.servant.attack * (1 + bonus)
 
     def GetServantDef(self):
-        return self.servant.defense
+        bonus = sum(b.value for b in self.stat_buffs if b.buff_type == 'def')
+        return self.servant.defense * (1 + bonus)
 
     def GetServantName(self):
         return self.servant.name
@@ -116,10 +139,12 @@ class TeamMember:
         return self.servant.level
 
     def GetServantSpeed(self):
-        return self.servant.speed
+        bonus = sum(b.value for b in self.stat_buffs if b.buff_type == 'speed')
+        return self.servant.speed * (1 + bonus)
 
     def GetServantTactics(self):
-        return self.servant.tactics
+        bonus = sum(b.value for b in self.stat_buffs if b.buff_type == 'tactics')
+        return self.servant.tactics * (1 + bonus)
 
     def GetServantBasicRange(self):
         return self.servant.basic_attack_range
@@ -153,6 +178,36 @@ class TeamMember:
         for skill in self.skills:
             if skill is not None:
                 skill.TickCooldown()
+
+    # ── Buff / status helpers ──────────────────────────────────────────────────
+    def IsSilenced(self):
+        """Return True when this unit is under silence and cannot use active skills."""
+        return self.silence_remaining > 0
+
+    def ApplyStatBuff(self, buff_type, value, remaining_turns):
+        """
+        Attach a stat buff.  *remaining_turns* = -1 for whole-battle duration,
+        or a positive integer for a fixed number of turns.
+        """
+        self.stat_buffs.append(StatBuff(buff_type, value, remaining_turns))
+
+    def ApplySilence(self, turns):
+        """Apply silence for *turns* turns (takes the maximum if already silenced)."""
+        self.silence_remaining = max(self.silence_remaining, turns)
+
+    def TickStates(self):
+        """Tick buff durations and silence counter at end of this member's action."""
+        if self.silence_remaining > 0:
+            self.silence_remaining -= 1
+        updated = []
+        for b in self.stat_buffs:
+            if b.remaining_turns == -1:
+                updated.append(b)           # permanent – never expires
+            else:
+                b.remaining_turns -= 1
+                if b.remaining_turns > 0:
+                    updated.append(b)       # still has time remaining
+        self.stat_buffs = updated
 
 
 # ── Targeting helpers ─────────────────────────────────────────────────────────
@@ -193,6 +248,9 @@ def ExecuteSkill(caster, skill, alive_allies, alive_enemies):
     target_names = "、".join(t.GetServantName() for t in targets)
     print(f"  [{caster.GetServantName()}] 释放技能【{skill.name}】-> [{target_names}]")
 
+    # Duration for any buffs this skill applies (-1 = whole battle, else turns)
+    buff_duration = -1 if skill.buff_turns == 0 else skill.buff_turns
+
     for target in targets:
         if skill.damage_ratio > 0:
             raw = caster.GetServantAtk() * skill.damage_ratio * 100.0 / (
@@ -208,6 +266,36 @@ def ExecuteSkill(caster, skill, alive_allies, alive_enemies):
             print(f"    -> [{target.GetServantName()}] 恢复 {healed} HP，"
                   f"当前HP {target.GetServantPower()}/{target.max_power}")
 
+        # ── Stat buffs ────────────────────────────────────────────────────────
+        if skill.buff_atk != 0:
+            target.ApplyStatBuff('atk', skill.buff_atk, buff_duration)
+            sign = "+" if skill.buff_atk > 0 else ""
+            print(f"    -> [{target.GetServantName()}] 攻击{sign}{skill.buff_atk * 100:.0f}%"
+                  f"({'永久' if buff_duration == -1 else f'{buff_duration}回合'})")
+
+        if skill.buff_def != 0:
+            target.ApplyStatBuff('def', skill.buff_def, buff_duration)
+            sign = "+" if skill.buff_def > 0 else ""
+            print(f"    -> [{target.GetServantName()}] 防御{sign}{skill.buff_def * 100:.0f}%"
+                  f"({'永久' if buff_duration == -1 else f'{buff_duration}回合'})")
+
+        if skill.buff_tactics != 0:
+            target.ApplyStatBuff('tactics', skill.buff_tactics, buff_duration)
+            sign = "+" if skill.buff_tactics > 0 else ""
+            print(f"    -> [{target.GetServantName()}] 谋略{sign}{skill.buff_tactics * 100:.0f}%"
+                  f"({'永久' if buff_duration == -1 else f'{buff_duration}回合'})")
+
+        if skill.buff_speed != 0:
+            target.ApplyStatBuff('speed', skill.buff_speed, buff_duration)
+            sign = "+" if skill.buff_speed > 0 else ""
+            print(f"    -> [{target.GetServantName()}] 速度{sign}{skill.buff_speed * 100:.0f}%"
+                  f"({'永久' if buff_duration == -1 else f'{buff_duration}回合'})")
+
+        # ── Silence ───────────────────────────────────────────────────────────
+        if skill.silence_turns > 0:
+            target.ApplySilence(skill.silence_turns)
+            print(f"    -> [{target.GetServantName()}] 陷入沉默 {skill.silence_turns} 回合！")
+
     skill.SetCooldown()
     return True
 
@@ -215,7 +303,7 @@ def ExecuteSkill(caster, skill, alive_allies, alive_enemies):
 def ExecuteBasicAttack(attacker, alive_enemies):
     """
     Perform a basic attack against a random enemy within basic_attack_range.
-    Does nothing when no valid target exists.
+    Returns the target that was hit, or None when no valid target exists.
     """
     basic_range = attacker.GetServantBasicRange()
     valid = [
@@ -224,7 +312,7 @@ def ExecuteBasicAttack(attacker, alive_enemies):
     ]
     if not valid:
         print(f"  [{attacker.GetServantName()}] 没有射程内的敌方目标，跳过普攻")
-        return
+        return None
 
     target = random.choice(valid)
     raw = attacker.GetServantAtk() * 100.0 / (100.0 + target.GetServantDef())
@@ -232,11 +320,70 @@ def ExecuteBasicAttack(attacker, alive_enemies):
     status = "倒下！" if target.GetServantPower() <= 0 else f"剩余HP {target.GetServantPower()}/{target.max_power}"
     print(f"  [{attacker.GetServantName()}] 普攻 -> [{target.GetServantName()}] "
           f"造成 {dmg} 伤害，{status}")
+    return target
+
+
+def ExecuteChaseSkills(attacker, alive_allies, alive_enemies):
+    """
+    After a basic attack, roll for each chase skill (skill_type=4).
+    Each chase skill triggers independently based on its trigger_prob.
+    Chase skills use their own targeting configuration.
+    """
+    for skill in attacker.skills:
+        if skill is None or skill.skill_type != 4:
+            continue
+        if random.random() < skill.trigger_prob:
+            print(f"  [{attacker.GetServantName()}] 触发追击技能【{skill.name}】")
+            ExecuteSkill(attacker, skill, alive_allies, alive_enemies)
+
+
+def ExecutePreBattleSkills(TeamA, TeamB):
+    """
+    Execute command (type=3) and passive (type=2) skills before combat begins,
+    in descending speed order.  Command skills fire first, then passive skills.
+    Neither type is blocked by silence.
+    """
+    all_members = TeamA + TeamB
+    all_members.sort(key=lambda x: x.GetServantSpeed(), reverse=True)
+
+    print("\n=== 开战技能阶段 ===")
+
+    # ── Command skills (指挥技能) ─────────────────────────────────────────────
+    has_command = any(
+        s is not None and s.skill_type == 3
+        for m in all_members for s in m.skills
+    )
+    if has_command:
+        print("\n-- 指挥技能 --")
+        for member in all_members:
+            allies = TeamA if member.team_id == 1 else TeamB
+            enemies = TeamB if member.team_id == 1 else TeamA
+            for skill in member.skills:
+                if skill is not None and skill.skill_type == 3:
+                    ExecuteSkill(member, skill, allies, enemies)
+
+    # ── Passive skills (被动技能) ─────────────────────────────────────────────
+    has_passive = any(
+        s is not None and s.skill_type == 2
+        for m in all_members for s in m.skills
+    )
+    if has_passive:
+        print("\n-- 被动技能 --")
+        for member in all_members:
+            allies = TeamA if member.team_id == 1 else TeamB
+            enemies = TeamB if member.team_id == 1 else TeamA
+            for skill in member.skills:
+                if skill is not None and skill.skill_type == 2:
+                    ExecuteSkill(member, skill, allies, enemies)
 
 
 # ── Main simulation loop ──────────────────────────────────────────────────────
 def CombatSimulate(TeamA, TeamB):
     print("\n=== 战斗开始 ===\n")
+
+    # ── Pre-battle: command and passive skills ────────────────────────────────
+    ExecutePreBattleSkills(TeamA, TeamB)
+
     turn = 0
     max_turns = 50  # Safety cap to prevent infinite loops
 
@@ -261,8 +408,9 @@ def CombatSimulate(TeamA, TeamB):
 
             team_label = _TEAM_LABEL[member.team_id]
             pos_label = member.GetPositionName()
+            silence_tag = " [沉默]" if member.IsSilenced() else ""
             print(f"[{team_label}·{pos_label}] {member.GetServantName()} 行动 "
-                  f"(HP:{member.GetServantPower()}/{member.max_power})")
+                  f"(HP:{member.GetServantPower()}/{member.max_power}){silence_tag}")
 
             # Resolve allies and living enemies for this action
             if member.team_id == 1:
@@ -272,23 +420,36 @@ def CombatSimulate(TeamA, TeamB):
                 alive_allies = [m for m in TeamB if m.GetServantPower() > 0]
                 alive_enemies = [m for m in TeamA if m.GetServantPower() > 0]
 
-            # 1. Attempt to cast skills (prioritise in slot order; cast first ready skill)
+            # 1. Attempt to cast an active skill (type=1) –
+            #    skips passive/command/chase; checks silence and trigger probability.
             skill_cast = False
-            for skill in member.skills:
-                if skill is None or not skill.IsReady():
-                    continue
-                if skill.skill_type == 2:  # Passive – not triggered here
-                    continue
-                if ExecuteSkill(member, skill, alive_allies, alive_enemies):
-                    skill_cast = True
-                    break  # One skill per turn
+            if member.IsSilenced():
+                print(f"  [{member.GetServantName()}] 处于沉默状态，无法释放主动技能")
+            else:
+                for skill in member.skills:
+                    if skill is None:
+                        continue
+                    if skill.skill_type != 1:   # Only active skills trigger here
+                        continue
+                    if not skill.IsReady():
+                        continue
+                    if not (random.random() < skill.trigger_prob):
+                        continue                # Failed probability roll
+                    if ExecuteSkill(member, skill, alive_allies, alive_enemies):
+                        skill_cast = True
+                        break                   # One active skill per turn
 
             # 2. Perform basic attack (only if the caster is still alive)
             if member.GetServantPower() > 0:
-                ExecuteBasicAttack(member, alive_enemies)
+                hit_target = ExecuteBasicAttack(member, alive_enemies)
 
-            # 3. Tick cooldowns at end of this member's action
+                # 3. Chase skills trigger after a successful basic attack
+                if hit_target is not None and member.GetServantPower() > 0:
+                    ExecuteChaseSkills(member, alive_allies, alive_enemies)
+
+            # 4. Tick cooldowns and state durations at end of this member's action
             member.TickSkillCooldowns()
+            member.TickStates()
 
         # End-of-turn status
         a_alive = [m for m in TeamA if m.GetServantPower() > 0]
@@ -312,14 +473,19 @@ def CombatSimulate(TeamA, TeamB):
 # ── Entry point ───────────────────────────────────────────────────────────────
 def StartCombat():
     # Team A: positions 1(前锋) / 2(中军) / 3(大营)
-    a1 = TeamMember(TeamA_Config[0], 50, 1, 1)              # front
-    a2 = TeamMember(TeamA_Config[1], 40, 1, 2)              # middle
-    a3 = TeamMember(TeamA_Config[2], 38, 1, 3)              # base  (healer)
+    # a1 carries command skill 30001 (指挥鼓舞 – ATK buff for all allies)
+    a1 = TeamMember(TeamA_Config[0], 50, 1, 1)
+    # a2 carries active skill 20001 + chase skill 30003 (连击)
+    a2 = TeamMember(TeamA_Config[1], 40, 1, 2, [30003])
+    # a3 carries passive skill 30002 (坚韧防守 – self DEF buff) + active heal 20003
+    a3 = TeamMember(TeamA_Config[2], 38, 1, 3, [20003])
 
     # Team B: positions 4(前锋) / 5(中军) / 6(大营)
-    b1 = TeamMember(TeamB_Config[0], 37, 2, 4)              # front
-    b2 = TeamMember(TeamB_Config[1], 45, 2, 5, [20002])     # middle – extra AoE skill
-    b3 = TeamMember(TeamB_Config[2], 48, 2, 6)              # base
+    b1 = TeamMember(TeamB_Config[0], 37, 2, 4)
+    # b2 carries active AoE skill 20002
+    b2 = TeamMember(TeamB_Config[1], 45, 2, 5, [20002])
+    # b3 carries active silence skill 20006 (震慑)
+    b3 = TeamMember(TeamB_Config[2], 48, 2, 6, [20006])
 
     TeamArrayA = [a1, a2, a3]
     TeamArrayB = [b1, b2, b3]
@@ -330,7 +496,8 @@ def StartCombat():
         print(f"\n{label}队伍:")
         for m in team:
             skill_names = [
-                s.name for s in m.skills if s is not None
+                f"{s.name}({_SKILL_TYPE_LABEL.get(s.skill_type, '?')})"
+                for s in m.skills if s is not None
             ]
             print(f"  [{m.GetPositionName()}] {m.GetServantName()} "
                   f"攻:{m.GetServantAtk():.1f} 防:{m.GetServantDef():.1f} "
