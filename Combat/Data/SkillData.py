@@ -1,14 +1,49 @@
 #!/usr/bin/python3
 
+
 class StzbSkill:
-    type = 1
+    """
+    Represents a skill instance attached to a TeamMember.
 
-    def __init__(self, config_id, level):
+    skill_type  : 1=主动(active)  2=被动(passive)  3=指挥(command)  4=追击(chase)
+    target_type : 1=敌方(enemy)   2=友方(ally)      3=无限制(all)
+    """
+
+    def __init__(self, config_id, level, config_data=None):
         self.config_id = config_id
-        self.level = level
+        self.level = level  # Reserved for future per-level stat scaling
 
-    def SkillCast(self):
-        self.level = 10
+        if config_data is not None:
+            self.name = config_data.name
+            self.skill_type = config_data.skill_type
+            self.target_type = config_data.target_type
+            self.target_num = config_data.target_num
+            self.effect_radius = config_data.effect_radius
+            self.damage_ratio = config_data.damage_ratio
+            self.heal_ratio = config_data.heal_ratio
+            self.cooldown = config_data.cooldown
+        else:
+            self.name = f"技能{config_id}"
+            self.skill_type = 1
+            self.target_type = 1
+            self.target_num = 1
+            self.effect_radius = 2
+            self.damage_ratio = 1.0
+            self.heal_ratio = 0.0
+            self.cooldown = 2
 
-    def CastToTarget(self, target):
-        pass
+        # Remaining cooldown turns; starts at 0 so the skill is ready on the first turn.
+        self.current_cooldown = 0
+
+    def IsReady(self):
+        """Return True when the skill can be cast this turn."""
+        return self.current_cooldown == 0
+
+    def TickCooldown(self):
+        """Decrease the remaining cooldown by one turn (called at end of each turn)."""
+        if self.current_cooldown > 0:
+            self.current_cooldown -= 1
+
+    def SetCooldown(self):
+        """Reset cooldown after the skill has been cast."""
+        self.current_cooldown = self.cooldown
